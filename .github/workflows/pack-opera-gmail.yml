@@ -1,0 +1,41 @@
+name: Pack and Prepare Opera Gmail
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Decode .pem Key
+        run: |
+          echo "$EXTENSION_KEY_B64" | base64 -d > extension-key.pem
+
+      - name: Pack Extension with .pem
+        run: |
+          mkdir -p packed
+          /usr/bin/google-chrome \
+            --headless \
+            --no-sandbox \
+            --disable-gpu \
+            --pack-extension=./extension \
+            --pack-extension-key=./extension-key.pem
+          mv ./gmail.crx ./packed/gmail.crx
+
+      - name: Upload Packed Extension
+        uses: actions/upload-artifact@v3
+        with:
+          name: opera-extension
+          path: packed/gmail.crx
+
+      - name: Notify for Manual Upload (via email/webhook)
+        run: echo "Opera extension packed. Please manually upload ./packed/gmail.crx to https://addons.opera.com/developer/"
