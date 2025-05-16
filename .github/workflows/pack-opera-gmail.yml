@@ -1,4 +1,4 @@
-name: Pack and Prepare Opera Gmail
+name: Pack and Prepare opera-gmail
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
 
       - name: Decode .pem Key
         run: |
-          echo "$EXTENSION_KEY_B64" | base64 -d > extension-key.pem
+          echo "$EXTENSION_KEY_B64" | base64 -d -o opera-gmail-key.pem
 
       - name: Pack Extension with .pem
         run: |
@@ -27,15 +27,12 @@ jobs:
             --headless \
             --no-sandbox \
             --disable-gpu \
-            --pack-extension=./extension \
-            --pack-extension-key=./extension-key.pem
-          mv ./gmail.crx ./packed/gmail.crx
+            --pack-extension=./opera-gmail/gmail \
+            --pack-extension-key=./opera-gmail-key.pem
+          mv ./opera-gmail.crx ./packed/opera-gmail.crx
 
       - name: Upload Packed Extension
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: opera-extension
-          path: packed/gmail.crx
-
-      - name: Notify for Manual Upload (via email/webhook)
-        run: echo "Opera extension packed. Please manually upload ./packed/gmail.crx to https://addons.opera.com/developer/"
+          name: opera-gmail
+          path: packed/opera-gmail.crx
