@@ -18,7 +18,7 @@ jobs:
 
       - name: Decode .pem Key
         run: |
-          echo "$EXTENSION_KEY_B64" | base64 -d -o opera-gmail-key.pem
+          echo "$EXTENSION_KEY_B64" | base64 -d > opera-gmail-key.pem
 
       - name: Pack Extension with .pem
         run: |
