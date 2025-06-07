@@ -5,6 +5,8 @@ import { XMLParser } from 'fast-xml-parser';
 
 let timeout = null;
 let checkInterval = 30000; // 30 seconds between checks
+let isFirstRun = true;
+let hasStarted = false;
 
 // Handle service worker lifecycle
 self.addEventListener('install', (event) => {
@@ -14,10 +16,52 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   console.log('Gmail Notifier: Service worker activated');
-  event.waitUntil(clients.claim()); // Claim clients immediately
-  // Start the update cycle
-  setTimeout(() => Update(), 1000); // Slight delay to ensure everything is initialized
+  event.waitUntil(
+    clients.claim().then(() => {
+      // Start checking immediately when service worker becomes active
+      console.log('Gmail Notifier: Starting email checks from activate event');
+      startEmailChecking();
+    })
+  );
 });
+
+// Function to start email checking (prevents duplicate starts)
+function startEmailChecking() {
+  if (hasStarted) {
+    console.log('Gmail Notifier: Email checking already started, skipping');
+    return;
+  }
+
+  hasStarted = true;
+  console.log('Gmail Notifier: Starting email checking...');
+
+  // Start immediately
+  Update();
+}
+
+// Listen for browser startup
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    console.log('Gmail Notifier: Browser startup detected');
+    startEmailChecking();
+  });
+}
+
+// Listen for when extension is enabled/loaded
+if (typeof chrome !== 'undefined' && chrome.management && chrome.management.onEnabled) {
+  chrome.management.onEnabled.addListener((info) => {
+    if (info.id === chrome.runtime.id) {
+      console.log('Gmail Notifier: Extension enabled');
+      startEmailChecking();
+    }
+  });
+}
+
+// Fallback: Start checking after a short delay regardless
+setTimeout(() => {
+  console.log('Gmail Notifier: Fallback startup trigger');
+  startEmailChecking();
+}, 2000);
 
 // Listen for clicks on the extension icon
 chrome.action.onClicked.addListener(() => {
@@ -66,10 +110,17 @@ chrome.action.onClicked.addListener(() => {
 });
 
 const Failure = function(error) {
-  if (timeout !== null) return;
+  console.error('Gmail Notifier: Failure occurred:', error);
+
+  if (timeout !== null) {
+    clearTimeout(timeout);
+    timeout = null;
+  }
+
   chrome.action.setBadgeText({text:" ? "});
   chrome.action.setIcon({path:"icon-inactive.png"});
-  chrome.action.setTitle({title:'Gmail\n\n' + error});
+  chrome.action.setTitle({title:'Gmail Notifier\n\n' + error});
+
   timeout = setTimeout(function() { Update(); }, checkInterval);
 };
 
@@ -142,12 +193,34 @@ const Notify = function(entries) {
 };
 
 const Success = function(feedData) {
-  if (timeout !== null) return;
-  const feed = Read(feedData);
-  Notify(feed.entries);
-  chrome.action.setIcon({path: "icon-active.png"});
-  chrome.action.setBadgeText({text: feed.count === 0 ? '' : '' + feed.count});
-  chrome.action.setTitle({title: feed.title + '\n\n' + Summarise(feed.entries)});
+  console.log('Gmail Notifier: Processing successful response');
+
+  if (timeout !== null) {
+    clearTimeout(timeout);
+    timeout = null;
+  }
+
+  try {
+    const feed = Read(feedData);
+    console.log('Gmail Notifier: Parsed feed:', {
+      title: feed.title,
+      count: feed.count,
+      entries: feed.entries.length
+    });
+
+    Notify(feed.entries);
+    chrome.action.setIcon({path: "icon-active.png"});
+    chrome.action.setBadgeText({text: feed.count === 0 ? '' : '' + feed.count});
+    chrome.action.setTitle({title: feed.title + '\n\n' + Summarise(feed.entries)});
+
+    console.log('Gmail Notifier: Updated badge text to:', feed.count === 0 ? '(empty)' : feed.count);
+
+  } catch (error) {
+    console.error('Gmail Notifier: Error processing feed:', error);
+    Failure('Error processing Gmail feed: ' + error.message);
+    return;
+  }
+
   timeout = setTimeout(function() { Update(); }, checkInterval);
 };
 
@@ -161,25 +234,24 @@ const Update = function() {
     credentials: 'include' // Include cookies for authentication
   })
   .then(response => {
+    console.log('Gmail Notifier: Response status:', response.status);
+    console.log('Gmail Notifier: Response headers:', [...response.headers.entries()]);
+
     if (response.status === 401) {
-      throw new Error('You are not logged in.');
+      throw new Error('You are not logged in to Gmail.');
     } else if (!response.ok) {
       throw new Error('Error communicating with the server. HTTP status ' + response.status + '.');
     }
     return response.text(); // Get response as text
   })
   .then(xmlText => {
+    console.log('Gmail Notifier: Received XML data (first 200 chars):', xmlText.substring(0, 200));
     Success(xmlText);
+  })
+  .catch(error => {
+    console.error('Gmail Notifier: Update failed:', error);
+    Failure(error.message || 'Error communicating with the server.');
   });
-  // .catch(error => {
-  //   Failure(error.message || 'Error communicating with the server.');
-  //   console.log("Gmail Update: " + error.message);
-  // });
-
-  // Set timeout for the request
-  const requestTimeout = setTimeout(function() {
-    Failure('Error communicating with the server. Request timed out.');
-  }, 30000);
 };
 
 // Import a keepAlive mechanism that doesn't rely on alarms
